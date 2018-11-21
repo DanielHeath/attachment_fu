@@ -6,7 +6,10 @@ module Technoweenie # :nodoc:
 
         def self.included(base)
           base.send :extend, ClassMethods
-          base.alias_method_chain :process_attachment, :processing
+          base.class_eval do
+            alias_method :process_attachment_without_processing, :process_attachment
+            alias_method :process_attachment, :process_attachment_with_processing
+          end
         end
 
         module ClassMethods
