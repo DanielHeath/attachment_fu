@@ -61,7 +61,6 @@ module Technoweenie # :nodoc:
       #
       # === Optional configuration parameters
       #
-      # * <tt>:use_ssl</tt> - Defaults to false.
       # * <tt>:distribution_domain</tt> - The CloudFront distribution domain for the bucket.  This can either be the assigned
       #     distribution domain (ie. XXX.cloudfront.net) or a chosen domain using a CNAME. See CloudFront for more details.
       #
@@ -176,7 +175,7 @@ module Technoweenie # :nodoc:
           mattr_reader :bucket_name, :s3_config
 
           begin
-            require 'aws-sdk'
+            require 'aws-sdk-s3'
             #
             # Eagerly loads all AWS classes/modules registered with autoload to
             # make it threadsafe which allow to be used with Sidekiq.
@@ -184,7 +183,7 @@ module Technoweenie # :nodoc:
             #   * https://github.com/mperham/sidekiq/wiki/Problems-and-Troubleshooting#thread-safe-libraries
             #   * https://forums.aws.amazon.com/thread.jspa?messageID=290781#290781
             #
-            AWS.eager_autoload!
+            Aws::S3
           rescue LoadError
             raise RequiredLibraryNotFoundError.new('aws-sdk could not be loaded')
           end
@@ -193,13 +192,7 @@ module Technoweenie # :nodoc:
             @@s3_config_path = base.attachment_options[:s3_config_path] || (Rails.root.to_s + '/config/amazon_s3.yml')
             config = YAML.load(ERB.new(File.read(@@s3_config_path)).result)[Rails.env]
             config = config[base.attachment_options[:config_scope]] if base.attachment_options[:config_scope]
-
-            config['use_ssl'] = false if config['use_ssl'].nil?
-
             @@s3_config = config.symbolize_keys
-
-          #rescue
-          #  raise ConfigFileNotFoundError.new('File %s not found' % @@s3_config_path)
           end
 
           bucket_key = base.attachment_options[:bucket_key]
@@ -210,12 +203,10 @@ module Technoweenie # :nodoc:
             eval_string = "def bucket_name()\n  \"#{s3_config[:bucket_name]}\"\nend"
           end
           base.class_eval(eval_string, __FILE__, __LINE__)
-
-          AWS.config(
+          Aws.config.update(
             s3_config.slice(
               :access_key_id,
               :secret_access_key,
-              :use_ssl,
               :proxy_uri,
               :region
             )
@@ -227,7 +218,7 @@ module Technoweenie # :nodoc:
         end
 
         def self.protocol
-          @protocol ||= s3_config[:use_ssl] ? 'https://' : 'http://'
+          'https://'
         end
 
         def self.distribution_domain
@@ -258,11 +249,11 @@ module Technoweenie # :nodoc:
         end
 
         def s3_bucket
-          @s3_bucket ||= AWS::S3.new.buckets[bucket_name]
+          @s3_bucket ||= Aws::S3::Bucket.new bucket_name
         end
 
         def s3_object(thumbnail=nil)
-          s3_bucket.objects[full_filename(thumbnail)]
+          s3_bucket.object full_filename(thumbnail)
         end
 
         # All public objects are accessible via a GET request to the S3 servers. You can generate a
@@ -315,14 +306,6 @@ module Technoweenie # :nodoc:
         #   # Expiration in five hours from now
         #   @photo.authenticated_s3_url(:expires_in => 5.hours)
         #
-        # You can specify whether the url should go over SSL with the <tt>:use_ssl</tt> option.
-        # By default, the ssl settings for the current connection will be used:
-        #
-        #   @photo.authenticated_s3_url(:use_ssl => true)
-        #
-        # Finally, the optional thumbnail argument will output the thumbnail's filename (if any):
-        #
-        #   @photo.authenticated_s3_url('thumbnail', :expires_in => 5.hours, :use_ssl => true)
         def authenticated_s3_url(*args)
           options   = args.extract_options!
           options[:expires_in] = options[:expires_in].to_i if options[:expires_in]
@@ -366,9 +349,9 @@ module Technoweenie # :nodoc:
           def rename_file
             return unless @old_filename && @old_filename != filename
 
-            s3_bucket.objects[File.join(base_path, @old_filename)].move_to(
-              full_filename,
-              :acl => attachment_options[:s3_access]
+            s3_bucket.object(File.join(base_path, @old_filename)).move_to(
+              {bucket: s3_bucket, key: full_filename},
+              acl: attachment_options[:s3_access]
             )
 
             @old_filename = nil
