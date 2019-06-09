@@ -360,11 +360,11 @@ module Technoweenie # :nodoc:
 
           def save_to_storage
             if save_attachment?
-              s3_object.write(
-                (temp_path ? File.open(temp_path) : temp_data),
-                :content_type  => content_type,
-                :cache_control => attachment_options[:cache_control],
-                :acl           => attachment_options[:s3_access]
+              s3_object.put(
+                body: (temp_path ? File.open(temp_path) : temp_data),
+                content_type:  content_type,
+                cache_control: attachment_options[:cache_control],
+                acl:           attachment_options[:s3_access].to_s,
               )
             end
 
